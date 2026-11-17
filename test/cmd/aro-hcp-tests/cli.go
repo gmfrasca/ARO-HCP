@@ -131,6 +131,9 @@ func setupCli() (*cobra.Command, error) {
 			panic(fmt.Sprintf("couldn't build extension test specs from ginkgo: %+v", err.Error()))
 		}
 
+		// TEMPORARY (ARO-30015): remove this filter before merging.
+		specs = specs.MustFilter([]string{`name == "Update HCPOpenShiftCluster Negative creates a cluster and fails to update its name with a PATCH request"`})
+
 		// Count only the specs the upgrade/in-place suite actually schedules.
 		// ExpectFailure specs are quarantined out of that suite (see registerSuites),
 		// so counting them here would make the coordinator wait at the barrier for
@@ -202,9 +205,6 @@ func setupCli() (*cobra.Command, error) {
 
 		// Modify specs, such as adding a label to all specs
 		// 	specs = specs.AddLabel("SLOW")
-
-		// Specs can be globally filtered...
-		// specs = specs.MustFilter([]string{`name.contains("filter")`})
 
 		// Or walked...
 		// specs = specs.Walk(func(spec *extensiontests.ExtensionTestSpec) {

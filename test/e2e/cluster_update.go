@@ -81,6 +81,12 @@ var _ = Describe("Update HCPOpenShiftCluster", func() {
 				)
 				Expect(err).NotTo(HaveOccurred(), "failed to create customer resources for patch-name cluster")
 
+				authDiagnostics, err := tc.StartAdminCredentialDiagnostics(ctx, managedResourceGroupName)
+				Expect(err).NotTo(HaveOccurred(), "failed to start opt-in admin authentication diagnostics")
+				DeferCleanup(func() {
+					Expect(authDiagnostics.Close()).To(Succeed(), "failed to close admin authentication diagnostics")
+				})
+
 				By("creating the HCP cluster")
 				err = tc.CreateHCPClusterFromParam20240610(
 					ctx,
@@ -103,6 +109,7 @@ var _ = Describe("Update HCPOpenShiftCluster", func() {
 
 				By("ensuring the cluster is viable")
 				err = verifiers.VerifyHCPCluster(ctx, adminRESTConfig)
+				err = authDiagnostics.Finish(ctx, adminRESTConfig, err)
 				Expect(err).NotTo(HaveOccurred(), "failed to verify HCP cluster viability for patch-name test")
 
 				By("sending a PATCH request attempting to change the resource name")

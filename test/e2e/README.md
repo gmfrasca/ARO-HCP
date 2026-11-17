@@ -105,6 +105,73 @@ issuer specifications. Artifact-collection errors do not replace the test failur
 Collection is skipped when the per-test artifact directory is empty, including
 local runs without `ARTIFACT_DIR`.
 
+### Opt-in admin credential propagation diagnostics (ARO-30015)
+
+The negative PATCH-name test can observe customer client-CA propagation during
+cluster creation. This is diagnostic instrumentation, not a readiness retry or
+a fix: the initial viability failure is retained even if the same credential
+authenticates later. With diagnostics disabled, verification is unchanged.
+
+This management-cluster observer is a local development diagnostic, not a
+CI-ready PROD capture path. INT, STG, and PROD tests must run through Prow as
+described in [Running E2E Tests In CI](../../docs/ci/e2e-testing.md). Do not
+run the local command below against those environments or put management-cluster
+kubeconfigs into PR jobs. An ordinary Prow run leaves this observer disabled
+unless its kubeconfig variable is explicitly configured.
+
+For a local development environment, obtain approved access to the management
+cluster that will host the test cluster and save its kubeconfig locally.
+Install `kubectl` on the test runner
+and ensure that it can read that kubeconfig. The diagnostic account needs to list
+HostedClusters, get ConfigMaps, list Pods, read `pods/log`, and use `pods/exec`
+to run `cat /etc/kubernetes/certs/client-ca/ca.crt` in kube-apiserver containers.
+The hook does not acquire breakglass access or deploy resources itself.
+
+Build the test binary normally, configure the usual test environment, and run:
+
+```bash
+export ARTIFACT_DIR="$HOME/snapshots/aro-30015-live-$(date -u +%Y%m%dT%H%M%SZ)"
+export ARO_HCP_AUTH_DIAGNOSTICS_KUBECONFIG=/secure/path/management.kubeconfig
+
+./test/aro-hcp-tests run-test \
+  "Update HCPOpenShiftCluster Negative creates a cluster and fails to update its name with a PATCH request"
+```
+
+Running this test creates a cluster in the configured environment. Use an
+approved test subscription and the intended region/channel; setting the
+diagnostic variable does not configure the Azure environment or select nightly.
+Do not set `ARO_E2E_SKIP_CLEANUP`: normal cleanup and identity-lease handling
+must remain enabled.
+
+The observer starts before cluster creation, discovers the control-plane
+namespace by subscription and managed resource group, and samples every two
+seconds. After the initial viability check, the test remains alive for three
+minutes while issuing service-list requests with the exact returned customer
+certificate, without fetching or replacing credentials. Probes continue after
+the first success so intermittent authentication remains visible. These probes
+use the guest endpoint; per-pod API-server logs identify rejecting replicas.
+
+Each test's `admin-auth-diagnostics/observations.jsonl` records UTC observation
+times, ConfigMap resource versions, bundle SHA-256 hashes, public-certificate
+fingerprints/serials/key identifiers, per-pod mounted bundle hashes, node names,
+image IDs, probe HTTP statuses, and relevant API-server authentication/CA reload
+logs. Kubeconfigs, private keys, raw PEM, and Secret resources are not recorded.
+Stdout reports state changes rather than every poll.
+
+The final log fetch is bounded to five seconds and 4 MiB per API-server pod.
+Mounted-file reads have a five-second deadline plus at most one second to
+close inherited subprocess pipes.
+Collection errors or reaching that limit are explicit; do not treat missing
+observations as evidence that propagation completed. The hook stops before
+normal cleanup, including on earlier test failure or cancellation.
+
+Compare each ConfigMap bundle change with mounted bundle changes and the
+server timestamps embedded in `apiserver-log` entries. Observation timestamps
+bracket visibility at polling resolution; they are not exact server-side
+ConfigMap update times. A matching mounted hash does not itself establish that
+the API server's in-memory verifier reloaded. Correlate probe failures by the
+recorded client certificate serial and authority key identifier.
+
 ### Resource Naming
 
 > **Important:** These tests are running in parallel so it is **VITAL** that we avoid naming collisions with other tests that may be running in CI at the same time. This may break CI runs until the duplicate resources are removed!
